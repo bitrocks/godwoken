@@ -232,7 +232,7 @@ impl MemPool {
         Ok(run_result)
     }
 
-    /// Execute tx without: a) push it into pool; 2) verify signature; 3) check nonce
+    /// Execute tx without push it into pool
     pub fn execute_raw_transaction(
         &self,
         raw_tx: RawL2Transaction,

@@ -165,14 +165,28 @@ async fn execute_l2transaction(
 }
 
 async fn execute_raw_l2transaction(
-    Params((raw_l2tx,)): Params<(JsonBytes,)>,
+    Params((raw_l2tx, block_number)): Params<(
+        JsonBytes,
+        gw_jsonrpc_types::ckb_jsonrpc_types::Uint64,
+    )>,
     mem_pool: Data<MemPool>,
     store: Data<Store>,
-) -> Result<RunResult> {
+) -> Result<Option<RunResult>> {
+    let block_number = block_number.value();
+    let db = store.begin_transaction();
+    let block_hash = match db.get_block_hash_by_number(block_number)? {
+        Some(block_hash) => block_hash,
+        None => return Ok(None),
+    };
+
     let raw_l2tx_bytes = raw_l2tx.into_bytes();
     let raw_l2tx = packed::RawL2Transaction::from_slice(&raw_l2tx_bytes)?;
 
-    let raw_block = store.get_tip_block()?.raw();
+    // let raw_block = store.get_tip_block()?.raw();
+    let raw_block = match db.get_block(&block_hash)? {
+        Some(block) => block.raw(),
+        None => return Ok(None),
+    };
     let block_producer_id = raw_block.block_producer_id();
     let timestamp = raw_block.timestamp();
     let number = {
@@ -190,7 +204,15 @@ async fn execute_raw_l2transaction(
         .lock()
         .execute_raw_transaction(raw_l2tx, &block_info)?
         .into();
-    Ok(run_result)
+    // let state_db_version = StateDBVersion::from_history_state(&db, block_hash, None)?;
+    // let state_db = StateDBTransaction::from_version(&db, state_db_version)?;
+    // let state = state_db.account_state_tree()?;
+    // let chain_view = ChainView::new(&db, block_hash);
+    // execute tx
+    // let run_result =
+    // generator
+    // .execute_transaction(&chain_view, &state, &block_info, &raw_l2tx)?;
+    Ok(Some(run_result))
 }
 
 async fn submit_l2transaction(
@@ -216,31 +238,47 @@ async fn submit_withdrawal_request(
 }
 
 async fn get_balance(
-    Params((account_id, sudt_id)): Params<(AccountID, AccountID)>,
+    Params((account_id, sudt_id, block_number)): Params<(
+        AccountID,
+        AccountID,
+        gw_jsonrpc_types::ckb_jsonrpc_types::Uint64,
+    )>,
     store: Data<Store>,
-) -> Result<Uint128> {
+) -> Result<Option<Uint128>> {
+    let block_number = block_number.value();
     let db = store.begin_transaction();
-    let tip_hash = db.get_tip_block_hash()?;
+    let block_hash = match db.get_block_hash_by_number(block_number)? {
+        Some(block_hash) => block_hash,
+        None => return Ok(None),
+    };
     let state_db = StateDBTransaction::from_version(
         &db,
-        StateDBVersion::from_history_state(&db, tip_hash, None)?,
+        StateDBVersion::from_history_state(&db, block_hash, None)?,
     )?;
 
     let tree = state_db.account_state_tree()?;
     let balance = tree.get_sudt_balance(sudt_id.into(), account_id.into())?;
 
-    Ok(balance.into())
+    Ok(Some(balance.into()))
 }
 
 async fn get_storage_at(
-    Params((account_id, key)): Params<(AccountID, JsonH256)>,
+    Params((account_id, key, block_number)): Params<(
+        AccountID,
+        JsonH256,
+        gw_jsonrpc_types::ckb_jsonrpc_types::Uint64,
+    )>,
     store: Data<Store>,
-) -> Result<JsonH256> {
+) -> Result<Option<JsonH256>> {
+    let block_number = block_number.value();
     let db = store.begin_transaction();
-    let tip_hash = db.get_tip_block_hash()?;
+    let block_hash = match db.get_block_hash_by_number(block_number)? {
+        Some(block_hash) => block_hash,
+        None => return Ok(None),
+    };
     let state_db = StateDBTransaction::from_version(
         &db,
-        StateDBVersion::from_history_state(&db, tip_hash, None)?,
+        StateDBVersion::from_history_state(&db, block_hash, None)?,
     )?;
 
     let tree = state_db.account_state_tree()?;
@@ -248,7 +286,7 @@ async fn get_storage_at(
     let value = tree.get_value(account_id.into(), &key)?;
 
     let json_value = to_jsonh256(value);
-    Ok(json_value)
+    Ok(Some(json_value))
 }
 
 async fn get_account_id_by_script_hash(
@@ -273,20 +311,27 @@ async fn get_account_id_by_script_hash(
 }
 
 async fn get_nonce(
-    Params((account_id,)): Params<(AccountID,)>,
+    Params((account_id, block_number)): Params<(
+        AccountID,
+        gw_jsonrpc_types::ckb_jsonrpc_types::Uint64,
+    )>,
     store: Data<Store>,
-) -> Result<Uint32> {
+) -> Result<Option<Uint32>> {
+    let block_number = block_number.value();
     let db = store.begin_transaction();
-    let tip_hash = db.get_tip_block_hash()?;
+    let block_hash = match db.get_block_hash_by_number(block_number)? {
+        Some(block_hash) => block_hash,
+        None => return Ok(None),
+    };
     let state_db = StateDBTransaction::from_version(
         &db,
-        StateDBVersion::from_history_state(&db, tip_hash, None)?,
+        StateDBVersion::from_history_state(&db, block_hash, None)?,
     )?;
     let tree = state_db.account_state_tree()?;
 
     let nonce = tree.get_nonce(account_id.into())?;
 
-    Ok(nonce.into())
+    Ok(Some(nonce.into()))
 }
 
 async fn get_script(
